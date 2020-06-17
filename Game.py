@@ -1,11 +1,9 @@
 import time
 import sys
-import threading
-from random import shuffle
+from random import randint
 import Tetrominoes
 import Display
 import Constants
-import Getch
 
 
 # Maintain two global versions of the board, the first is an array of rows (starting at the top and moving down the
@@ -15,15 +13,10 @@ board = []
 # The second is an array of RGB tuples storing the colour of each position. This does include the falling tetromino
 board_display = []
 # The game speed defines the number of milliseconds it takes for a block to fall one row
-game_speed = 600
-# The tetromino that is currently falling, as long as the game is running there will always be one. It is initialised
-# to an I block but is overwritten as soon as the game starts and the queue is generated
-falling_tetromino = Tetrominoes.I()
-# The queue contains the order of tetrominoes to be dropped
-queue = []
-# Dimensions of the LED panels
-Constants.BOARD_HEIGHT = 64
-Constants.BOARD_WIDTH = 96
+game_speed = Constants.GAME_SPEED
+# A list of length NUM_GAMES, where each item is a list of tetrominoes falling within a given game. Tetrominoes remain
+# in their respective list until they collide with a piece or the bottom of the game
+falling_tetrominoes = [[] for game in range(Constants.NUM_GAMES)]
 # Global game over signal to allow thread to signify game end
 game_over = False
 
@@ -34,136 +27,73 @@ def generate_board():
 
 
 def generate_display_board():
-    """ Initialises an empty board display"""
+    """ Initialises an empty board display """
     global board_display
     board_display = [(0, 0, 0)] * Constants.BOARD_WIDTH * Constants.BOARD_HEIGHT
 
 
+def generate_starting_tetrominoes():
+    """ Initialises the falling tetrominoes with one random tetromino per game """
+    global falling_tetrominoes
+    falling_tetrominoes = [[] for game in range(Constants.NUM_GAMES)]
+    for game in range(Constants.NUM_GAMES):
+        add_next_tetromino(game)
+
+
 def play_game():
-    """ Main game loop which handles user input and the descent timing """
-    global queue
+    """ Main game loop which handles the descent timing """
     global game_over
-    global falling_tetromino
-    # Generate the queue of tetrominoes to be dropped
-    queue = generate_queue()
-    # Drop the tetromino at the front of the queue
-    add_next_tetromino()
-
-    # Records the time at which the tetromino was last dropped a row, setting it to the current time avoids
-    # having it drop as soon as the game starts
-    last_drop_time = time.time()
-
-    # Start user input thread
-    threading.Thread(target=input_thread).start()
-
+    global falling_tetrominoes
     while True:
         # Check the game hasn't ended
         if game_over:
             break
         # Check if the tetromino needs to descend
         current_time = time.time()
-        if (current_time - last_drop_time) * 1000 > game_speed:
-            # Set the last drop time
-            last_drop_time = current_time
-            # Delay defined by game speed has passed, drop the tetromino
-            if not attempt_drop_one_row(falling_tetromino):
-                # Collision occurs, attach to board and attempt to drop next tetromino
-                if not place_tetromino_and_create_next(falling_tetromino):
-                    game_over = True
-                    break
+        for game in range(Constants.NUM_GAMES):
+            for tetromino in falling_tetrominoes[game]:
+                if (current_time - tetromino.last_drop_time) * 1000 > game_speed:
+                    # Set the last drop time
+                    tetromino.last_drop_time = current_time
+                    # Delay defined by game speed has passed, drop the tetromino
+                    if not attempt_drop_one_row(tetromino):
+                        # Collision occurs, attach to board and attempt to drop next tetromino
+                        if not place_tetromino_and_create_next(tetromino):
+                            game_over = True
+                            break
 
 
-def input_thread():
-    """ Checks user input and calls the appropriate functions. This method will run in its own thread so that it doesn't
-    block the main game timer while waiting for input
-    """
-    global game_over
-    lock = threading.Lock()
-    while True:
-        with lock:
-            # Check game over
-            if game_over:
-                break
-            user_input = Getch.getch()
-            if user_input == 'w':
-                # Rotate the tetromino
-                attempt_rotation(falling_tetromino)
-            elif user_input == 'a':
-                # Move the tetromino left
-                attempt_move("LEFT", falling_tetromino)
-            elif user_input == 'd':
-                # Move the tetromino right
-                attempt_move("RIGHT", falling_tetromino)
-            elif user_input == 's':
-                # Soft drop the tetromino one row
-                attempt_drop_one_row(falling_tetromino)
-            elif user_input == ' ':
-                # Hard drop the tetromino to the bottom of the board
-                # Keep track of how many rows were skipped
-                rows_dropped = 0
-                # Keep dropping rows until a collision occurs
-                while attempt_drop_one_row(falling_tetromino):
-                    rows_dropped += 1
-                # Tetromino collided, attach to board and attempt to drop the next tetromino
-                if not place_tetromino_and_create_next(falling_tetromino):
-                    game_over = True
-                    break
-            elif user_input == 'b':
-                # Break the game process
-                game_over = True
-                break
-
-
-def generate_queue():
-    """ Generate the queue which defines the order in which tetrominoes are added to the board. The queue is a random
-    permutation of the 7 ids (0..6) """
-    global queue
-    queue = list(range(7))
-    shuffle(queue)
-    return queue
-
-
-def add_next_tetromino():
-    """ Attempts to add the next tetromino in the queue. If the tetromino cannot be added then the
-    game is over
-    """
-    global falling_tetromino
-    falling_tetromino = get_tetromino_from_queue()
+def add_next_tetromino(game):
+    """ Attempts to add a new tetromino for a game. If the tetromino cannot be added then the game is over """
+    global falling_tetrominoes
+    new_tetromino = get_tetromino(game)
+    falling_tetrominoes[game].append(new_tetromino)
     # Check if the tetromino will collide
-    if tetromino_collides(falling_tetromino):
+    if tetromino_collides(new_tetromino):
         return False  # Game over
 
-    add_tetromino_to_display(falling_tetromino)
+    add_tetromino_to_display(new_tetromino)
     Display.update_display(board_display)
 
     # Successfully added
     return True
 
 
-def get_tetromino_from_queue():
-    """ Returns an instance of the tetromino at the front of the queue. If the queue is empty, a new queue is
-    generated """
-    global queue
-    if not queue:
-        queue = generate_queue()
-    return get_tetromino(queue.pop(0))
-
-
-def get_tetromino(tetromino_id):
+def get_tetromino(game):
     """ Returns the tetromino with the given id """
     return {
-        0: Tetrominoes.I(),
-        1: Tetrominoes.J(),
-        2: Tetrominoes.L(),
-        3: Tetrominoes.O(),
-        4: Tetrominoes.S(),
-        5: Tetrominoes.T(),
-        6: Tetrominoes.Z()
-    }.get(tetromino_id)
+        0: Tetrominoes.I(game),
+        1: Tetrominoes.J(game),
+        2: Tetrominoes.L(game),
+        3: Tetrominoes.O(game),
+        4: Tetrominoes.S(game),
+        5: Tetrominoes.T(game),
+        6: Tetrominoes.Z(game)
+    }.get(randint(0, 6))
 
 
 def tetromino_collides(tetromino):
-    """ Checks if the tetromino will collide with an others on the board and returns True if a collision occurs """
+    """ Checks if the tetromino will collide with any others on the board and returns True if a collision occurs """
     for row in range(tetromino.height):
         # Only check if row is non-zero, i.e. the tetromino occupies space in the row
         if tetromino.patterns[tetromino.rotation][row]:
@@ -310,8 +240,10 @@ def place_tetromino_and_create_next(tetromino):
             board[board_row] |= (tetromino.patterns[tetromino.rotation][row] << tetromino.xpos)
     # Check if it completed any rows
     check_for_completed_rows(tetromino)
+    # Remove the tetromino from the falling tetrominoes
+    falling_tetrominoes[tetromino.game].remove(tetromino)
     # Attempt to add the next tetromino
-    return add_next_tetromino()
+    return add_next_tetromino(tetromino.game)
 
 
 def check_for_completed_rows(tetromino):
@@ -373,11 +305,20 @@ def remove_tetromino_from_display(tetromino):
 
 
 def handle_game_end():
-    print("you deaded loser")
+    print("Game ended")
+    print("Type 'n' to start a new game")
     while True:
         user_input = sys.stdin.read(1)
-        if user_input == 'r':
+        if user_input == 'n':
+            reset_game_properties()
             break
+
+
+def reset_game_properties():
+    global game_over
+    game_over = False
+    global game_speed
+    game_speed = Constants.GAME_SPEED
 
 
 if __name__ == "__main__":
@@ -385,5 +326,6 @@ if __name__ == "__main__":
     while True:
         generate_board()
         generate_display_board()
+        generate_starting_tetrominoes()
         play_game()
         handle_game_end()
