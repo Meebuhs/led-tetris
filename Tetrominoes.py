@@ -12,7 +12,7 @@ class Tetromino(object):
         self.xpos = floor((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * (game + 0.5))
         # The y position of the block, starting at the top
         self.ypos = 0
-        # The rotation of the block, incrementing rotation by 1 symbolises a 90 degree counterclockwise rotation
+        # The rotation of the block, incrementing rotation by 1 symbolises a 90 degree rotation
         self.rotation = 0
         # The patterns for the block. A single pattern of a block is an array of binary numbers with a bit for each
         # column and a 1 indicating the position is occupied. The array contains as many numbers as the block has rows.
