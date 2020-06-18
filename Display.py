@@ -5,8 +5,8 @@ import Constants
 options = RGBMatrixOptions()
 #options.rows = Constants.BOARD_HEIGHT
 #options.cols = Constants.BOARD_WIDTH
-options.chain_length = 3
-options.parallel = 2
+options.chain_length = Constants.CHAIN_LENGTH
+options.parallel = Constants.PARALLEL_CHAINS
 options.hardware_mapping = 'regular'
 #options.no_hardware_pulse = 1
 
