@@ -2,7 +2,7 @@ import threading
 import time
 import sys
 import copy
-from random import randint
+from random import randint, shuffle
 import Tetrominoes
 import Display
 import Constants
@@ -19,9 +19,11 @@ decided_board = []
 board_display = []
 # The game speed defines the number of milliseconds it takes for a block to fall one row
 game_speed = Constants.GAME_SPEED
+# The queues of tetrominoes which define the order in which tetrominoes will drop for each game
+queues = [[] for _ in range(Constants.NUM_GAMES)]
 # A list of length NUM_GAMES, where each item is a list of tetrominoes falling within a given game. Tetrominoes remain
 # in their respective list until they collide with a piece or the bottom of the game
-falling_tetrominoes = [[] for game in range(Constants.NUM_GAMES)]
+falling_tetrominoes = [[] for _ in range(Constants.NUM_GAMES)]
 # Global game over signal to allow thread to signify game end
 game_over = False
 
@@ -31,6 +33,7 @@ def initialise_game():
     initialise_board()
     initialise_decided_board()
     initialise_display_board()
+    initialise_queues()
     initialise_falling_tetrominoes()
 
 
@@ -52,10 +55,24 @@ def initialise_display_board():
     board_display = [(0, 0, 0)] * Constants.BOARD_WIDTH * Constants.BOARD_HEIGHT
 
 
+def initialise_queues():
+    """ Initialise the tetromino queues which define the order in which tetrominoes are added to the board. The queue
+    is a random permutation of the 7 possible tetromino ids (0..6) """
+    global queues
+    for game in range(Constants.NUM_GAMES):
+        generate_queue(game)
+
+
+def generate_queue(game):
+    """ Generates the queue for the given game """
+    queues[game] = list(range(7))
+    shuffle(queues[game])
+
+
 def initialise_falling_tetrominoes():
     """ Initialises the falling tetrominoes """
     global falling_tetrominoes
-    falling_tetrominoes = [[] for game in range(Constants.NUM_GAMES)]
+    falling_tetrominoes = [[] for _ in range(Constants.NUM_GAMES)]
 
 
 def play_game():
@@ -121,10 +138,11 @@ def calculate_best_position(tetromino):
     # Tetrominoes are shared by adjacent games
     min_column = int((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * (tetromino.game))
     max_column = int((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * (tetromino.game + 1))
+
+    dummy_tetromino = copy.copy(tetromino)
     # Test each permutation of the tetromino
     for xpos in range(min_column, max_column):
         for rotation in range(len(tetromino.patterns)):
-            dummy_tetromino = copy.copy(tetromino)
             dummy_tetromino.rotation = rotation
             set_dimensions(dummy_tetromino, tetromino)
             dummy_tetromino.xpos = xpos
@@ -255,7 +273,7 @@ def add_next_tetromino(game):
     """ Attempts to add a new tetromino for a game. If the tetromino cannot be added then the game is over """
     global falling_tetrominoes
     global board
-    new_tetromino = get_tetromino(game)
+    new_tetromino = get_next_tetromino(game)
     falling_tetrominoes[game].append(new_tetromino)
     heuristic_thread = threading.Thread(target=calculate_best_position, args=(new_tetromino, ))
     heuristic_thread.start()
@@ -270,7 +288,16 @@ def add_next_tetromino(game):
     return True
 
 
-def get_tetromino(game):
+def get_next_tetromino(game):
+    """ Returns an instance of the tetromino at the front of the game's queue. If the queue is empty, a new queue is
+    generated """
+    global queues
+    if not queues[game]:
+        generate_queue(game)
+    return get_tetromino(queues[game].pop(0), game)
+
+
+def get_tetromino(tetromino_id, game):
     """ Returns the tetromino with the given id """
     return {
         0: Tetrominoes.I(game),
@@ -280,7 +307,7 @@ def get_tetromino(game):
         4: Tetrominoes.S(game),
         5: Tetrominoes.T(game),
         6: Tetrominoes.Z(game)
-    }.get(randint(0, 6))
+    }.get(tetromino_id)
 
 
 def tetromino_collides(tetromino, board):

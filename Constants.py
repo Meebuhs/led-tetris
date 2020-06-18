@@ -2,6 +2,7 @@
 # LEDmatrix configuration
 CHAIN_LENGTH = 3
 PARALLEL_CHAINS = 2
+LED_BRIGHTNESS = 100
 
 # The dimensions of the board
 BOARD_WIDTH = 96

@@ -7,6 +7,7 @@ options = RGBMatrixOptions()
 #options.cols = Constants.BOARD_WIDTH
 options.chain_length = Constants.CHAIN_LENGTH
 options.parallel = Constants.PARALLEL_CHAINS
+options.brightness = Constants.LED_BRIGHTNESS
 options.hardware_mapping = 'regular'
 #options.no_hardware_pulse = 1
 
