@@ -80,6 +80,19 @@ def play_game():
         current_time = time.time()
         for game in range(Constants.NUM_GAMES):
             for tetromino in falling_tetrominoes[game]:
+                # Calculate goal position
+                if tetromino.goal_xpos == -1:
+                    calculate_best_position(tetromino)
+                else:
+                    # Seek goal position
+                    if tetromino.goal_xpos != tetromino.xpos:
+                        if tetromino.goal_xpos > tetromino.xpos:
+                            attempt_move_left(tetromino)
+                        else:
+                            attempt_move_right(tetromino)
+                    if tetromino.goal_rotation != tetromino.rotation:
+                        attempt_rotation(tetromino)
+
                 if (current_time - tetromino.last_drop_time) * 1000 > game_speed:
                     # Set the last drop time
                     tetromino.last_drop_time = current_time
@@ -135,6 +148,19 @@ def calculate_best_position(tetromino):
                 best_rotation = rotation
     tetromino.goal_xpos = best_xpos
     tetromino.goal_rotation = best_rotation
+
+    add_tetromino_to_decided(tetromino)
+
+
+def add_tetromino_to_decided(tetromino):
+    """ Adds the tetromino to the decided board state """
+    global decided_board
+    # Add the tetromino to the board representation
+    for row in range(tetromino.height):
+        if tetromino.patterns[tetromino.rotation][row]:
+            board_row = tetromino.ypos + row
+            # OR the tetromino in position with the row
+            decided_board[board_row] |= (tetromino.patterns[tetromino.rotation][row] << tetromino.xpos)
 
 
 def check_row_below(tetromino):
@@ -286,15 +312,6 @@ def attempt_rotation(tetromino):
 
     Display.update_display(board_display)
     return True
-
-
-def attempt_move(direction, tetromino):
-    """ Attempt to move the tetromino in the specified direction. This will fail if it pushes the tetromino out of the
-     playable area or if it will collide with another tetromino """
-    if direction == "LEFT":
-        attempt_move_left(tetromino)
-    elif direction == "RIGHT":
-        attempt_move_right(tetromino)
 
 
 def attempt_move_left(tetromino):
