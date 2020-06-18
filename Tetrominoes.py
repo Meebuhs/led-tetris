@@ -17,11 +17,13 @@ class Tetromino(object):
         # The patterns for the block. A single pattern of a block is an array of binary numbers with a bit for each
         # column and a 1 indicating the position is occupied. The array contains as many numbers as the block has rows.
         self.patterns = []
-        # The column in which the tetromino will be dropped. Initialised to -1 and is changed when a position is decided
-        self.column = -1
         # Records the time at which the tetromino was last dropped a row, setting it to the current time avoids
         # having it drop as soon as the game starts
         self.last_drop_time = time.time()
+        # The goal x position decided by the heuristic, initialised to -1 and changed when decided
+        self.goal_xpos = -1
+        # The goal rotation decided by the heuristic, initialised to -1 and changed when decided
+        self.goal_rotation = -1
 
 
 class I(Tetromino):
