@@ -1,3 +1,4 @@
+import threading
 import time
 import sys
 import copy
@@ -63,13 +64,11 @@ def play_game():
     global falling_tetrominoes
 
     drop_count = 0
-    expected_drops = 1
-    # expected_drops = (Constants.BOARD_HEIGHT - Constants.DROP_SPACING) / Constants.DROP_SPACING * Constants.NUM_GAMES
     last_dropped_time = time.time()
     
     while True:
         # Drop tetrominoes at the start of the game
-        if drop_count < expected_drops:
+        if drop_count < Constants.NUM_GAMES:
             if handle_dropping_tetrominoes(drop_count, last_dropped_time):
                 drop_count += 1
                 last_dropped_time = time.time()
@@ -82,9 +81,7 @@ def play_game():
         for game in range(Constants.NUM_GAMES):
             for tetromino in falling_tetrominoes[game]:
                 # Calculate goal position
-                if tetromino.goal_xpos == -1:
-                    calculate_best_position(tetromino)
-                else:
+                if tetromino.goal_xpos != -1:
                     # Seek goal position
                     if tetromino.goal_xpos != tetromino.xpos:
                         if tetromino.goal_xpos < tetromino.xpos:
@@ -108,7 +105,7 @@ def play_game():
 def handle_dropping_tetrominoes(drop_count, last_dropped_time):
     """ Drops the initials tetrominoes evenly across the width of the board. Returns True if a tetromino is dropped. """
     # Space the tetromino drops evenly to maintain DROP_SPACING across NUM_GAMES games
-    if (time.time() - last_dropped_time) * 1000 >= Constants.DROP_SPACING / Constants.NUM_GAMES * Constants.GAME_SPEED:
+    if (time.time() - last_dropped_time) * 1000 >= Constants.BOARD_HEIGHT * 3 / 4 / Constants.NUM_GAMES * Constants.GAME_SPEED:
         add_next_tetromino(drop_count % Constants.NUM_GAMES)
         return True
     return False
@@ -122,8 +119,8 @@ def calculate_best_position(tetromino):
     best_rotation = -1
 
     # Tetrominoes are shared by adjacent games
-    min_column = int(max((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * (tetromino.game - 1), 0))
-    max_column = int(min((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * (tetromino.game + 1), Constants.BOARD_WIDTH))
+    min_column = int((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * (tetromino.game))
+    max_column = int((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * (tetromino.game + 1))
     # Test each permutation of the tetromino
     for xpos in range(min_column, max_column):
         for rotation in range(len(tetromino.patterns)):
@@ -221,7 +218,9 @@ def calculate_board_score(tetromino, home_position, board):
     # Column height variance
     total_height_variation = 0
     for column in range(1, len(column_heights)):
-        total_height_variation += abs(column_heights[column] - column_heights[column -1])
+        total_height_variation += abs(column_heights[column] - column_heights[column - 1])
+        # Wrap variation calculation to remove heavy preference for rightmost column
+        total_height_variation += abs(column_heights[0] - column_heights[-1])
     column_height_variance = total_height_variation
 
     cumulative_score = covered_empty_spaces * Constants.COVERED_EMPTY_SPACES_FACTOR
@@ -258,6 +257,8 @@ def add_next_tetromino(game):
     global board
     new_tetromino = get_tetromino(game)
     falling_tetrominoes[game].append(new_tetromino)
+    heuristic_thread = threading.Thread(target=calculate_best_position, args=(new_tetromino, ))
+    heuristic_thread.start()
     # Check if the tetromino will collide
     if tetromino_collides(new_tetromino, board):
         return False  # Game over
@@ -494,3 +495,4 @@ if __name__ == "__main__":
         initialise_game()
         play_game()
         handle_game_end()
+
