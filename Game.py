@@ -6,11 +6,14 @@ import Display
 import Constants
 
 
-# Maintain two global versions of the board, the first is an array of rows (starting at the top and moving down the
-# board) which have one bit per column, each indicating whether the position is occupied. This does not include the
-# falling tetromino
+# Maintain three global versions of the board. The first contains only the tetrominoes which have been placed on the
+# board via a collision. It is an arrays of binary numbers, each representing a row starting at the top of the board,
+# where each bit indicates whether the position is occupied.
 board = []
-# The second is an array of RGB tuples storing the colour of each position. This does include the falling tetromino
+# This contains the placed tetrominoes as well as the final position of any falling tetrominoes once they have been
+# decided and is structured the same as board.
+decided_board = []
+# The third is an array of RGB tuples storing the colour of each position. This does include any falling tetrominoes.
 board_display = []
 # The game speed defines the number of milliseconds it takes for a block to fall one row
 game_speed = Constants.GAME_SPEED
@@ -20,31 +23,55 @@ falling_tetrominoes = [[] for game in range(Constants.NUM_GAMES)]
 # Global game over signal to allow thread to signify game end
 game_over = False
 
-def generate_board():
+
+def initialise_game():
+    """ Initialises the data structures used to keep track of the game """
+    initialise_board()
+    initialise_decided_board()
+    initialise_display_board()
+    initialise_falling_tetrominoes()
+
+
+def initialise_board():
     """ Initialises an empty board """
     global board
     board = [0] * Constants.BOARD_HEIGHT
 
 
-def generate_display_board():
+def initialise_decided_board():
+    """ Initialises an empty decided board """
+    global decided_board
+    decided_board = [0] * Constants.BOARD_HEIGHT
+
+
+def initialise_display_board():
     """ Initialises an empty board display """
     global board_display
     board_display = [(0, 0, 0)] * Constants.BOARD_WIDTH * Constants.BOARD_HEIGHT
 
 
-def generate_starting_tetrominoes():
-    """ Initialises the falling tetrominoes with one random tetromino per game """
+def initialise_falling_tetrominoes():
+    """ Initialises the falling tetrominoes """
     global falling_tetrominoes
     falling_tetrominoes = [[] for game in range(Constants.NUM_GAMES)]
-    for game in range(Constants.NUM_GAMES):
-        add_next_tetromino(game)
 
 
 def play_game():
     """ Main game loop which handles the descent timing """
     global game_over
     global falling_tetrominoes
+
+    drop_count = 0
+    expected_drops = (Constants.BOARD_HEIGHT - Constants.DROP_SPACING) / Constants.DROP_SPACING * Constants.NUM_GAMES
+    last_dropped_time = time.time()
+
     while True:
+        # Drop tetrominoes at the start of the game
+        if drop_count < expected_drops:
+            if handle_dropping_tetrominoes(drop_count, last_dropped_time):
+                drop_count += 1
+                last_dropped_time = time.time()
+
         # Check the game hasn't ended
         if game_over:
             break
@@ -61,6 +88,15 @@ def play_game():
                         if not place_tetromino_and_create_next(tetromino):
                             game_over = True
                             break
+
+
+def handle_dropping_tetrominoes(drop_count, last_dropped_time):
+    """ Drops the initials tetrominoes evenly across the width of the board. Returns True if a tetromino is dropped. """
+    # Space the tetromino drops evenly to maintain DROP_SPACING across NUM_GAMES games
+    if time.time() - last_dropped_time >= Constants.DROP_SPACING / Constants.NUM_GAMES * Constants.GAME_SPEED:
+        add_next_tetromino(drop_count)
+        return True
+    return False
 
 
 def add_next_tetromino(game):
@@ -324,8 +360,6 @@ def reset_game_properties():
 if __name__ == "__main__":
     # Main game loop, is broken when a tetromino is blocked from entering the playing area
     while True:
-        generate_board()
-        generate_display_board()
-        generate_starting_tetrominoes()
+        initialise_game()
         play_game()
         handle_game_end()
