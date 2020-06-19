@@ -2,7 +2,7 @@ import threading
 import time
 import sys
 import copy
-from random import randint, shuffle
+from random import shuffle
 import Tetrominoes
 import Display
 import Constants
@@ -14,7 +14,7 @@ import Constants
 board = []
 # This contains the placed tetrominoes as well as the final position of any falling tetrominoes once they have been
 # decided and is structured the same as board.
-decided_board = []
+board_decided = []
 # The third is an array of RGB tuples storing the colour of each position. This does include any falling tetrominoes.
 board_display = []
 # The game speed defines the number of milliseconds it takes for a block to fall one row
@@ -23,9 +23,13 @@ game_speed = Constants.GAME_SPEED
 queues = [[] for _ in range(Constants.NUM_GAMES)]
 # A list of length NUM_GAMES, where each item is a list of tetrominoes falling within a given game. Tetrominoes remain
 # in their respective list until they collide with a piece or the bottom of the game
-falling_tetrominoes = [[] for _ in range(Constants.NUM_GAMES)]
+falling_tetrominoes = []
+# Queue for tetrominoes to be process by heuristic
+heuristic_queue = []
 # Global game over signal to allow thread to signify game end
 game_over = False
+# Global cleared lines counter
+cleared_lines = 0
 
 
 def initialise_game():
@@ -45,8 +49,8 @@ def initialise_board():
 
 def initialise_decided_board():
     """ Initialises an empty decided board """
-    global decided_board
-    decided_board = [0] * Constants.BOARD_HEIGHT
+    global board_decided
+    board_decided = [0] * Constants.BOARD_HEIGHT
 
 
 def initialise_display_board():
@@ -72,7 +76,7 @@ def generate_queue(game):
 def initialise_falling_tetrominoes():
     """ Initialises the falling tetrominoes """
     global falling_tetrominoes
-    falling_tetrominoes = [[] for _ in range(Constants.NUM_GAMES)]
+    falling_tetrominoes = []
 
 
 def play_game():
@@ -82,6 +86,9 @@ def play_game():
 
     drop_count = 0
     last_dropped_time = time.time()
+
+    heuristic_thread = threading.Thread(target=calculate_best_positions)
+    heuristic_thread.start()
     
     while True:
         # Drop tetrominoes at the start of the game
@@ -90,89 +97,91 @@ def play_game():
                 drop_count += 1
                 last_dropped_time = time.time()
 
-        # Check the game hasn't ended
         if game_over:
             break
         # Check if the tetromino needs to descend
         current_time = time.time()
-        for game in range(Constants.NUM_GAMES):
-            for tetromino in falling_tetrominoes[game]:
-                # Calculate goal position
-                if tetromino.goal_xpos != -1:
-                    # Seek goal position
-                    if tetromino.goal_xpos != tetromino.xpos:
-                        if tetromino.goal_xpos < tetromino.xpos:
-                            attempt_move_left(tetromino)
-                        else:
-                            attempt_move_right(tetromino)
-                    if tetromino.goal_rotation != tetromino.rotation:
-                        attempt_rotation(tetromino)
+        for tetromino in falling_tetrominoes:
+            if tetromino.goal_xpos != -1:
+                # Seek goal position
+                if tetromino.goal_xpos != tetromino.xpos:
+                    if tetromino.goal_xpos < tetromino.xpos:
+                        attempt_move_left(tetromino)
+                    else:
+                        attempt_move_right(tetromino)
+                if tetromino.goal_rotation != tetromino.rotation:
+                    attempt_rotation(tetromino)
 
-                if (current_time - tetromino.last_drop_time) * 1000 > game_speed:
-                    # Set the last drop time
-                    tetromino.last_drop_time = current_time
-                    # Delay defined by game speed has passed, drop the tetromino
-                    if not attempt_drop_one_row(tetromino):
-                        # Collision occurs, attach to board and attempt to drop next tetromino
-                        if not place_tetromino_and_create_next(tetromino):
-                            game_over = True
-                            break
+            if (current_time - tetromino.last_drop_time) * 1000 > game_speed:
+                tetromino.last_drop_time = current_time
+                if not attempt_drop_one_row(tetromino):
+                    # Collision occurs, attach to board and attempt to drop next tetromino
+                    if not place_tetromino_and_create_next(tetromino):
+                        game_over = True
+                        break
 
 
 def handle_dropping_tetrominoes(drop_count, last_dropped_time):
     """ Drops the initials tetrominoes evenly across the width of the board. Returns True if a tetromino is dropped. """
-    # Space the tetromino drops evenly to maintain DROP_SPACING across NUM_GAMES games
-    if (time.time() - last_dropped_time) * 1000 >= Constants.BOARD_HEIGHT * 3 / 4 / Constants.NUM_GAMES * Constants.GAME_SPEED:
+    # Space the tetromino drops evenly across NUM_GAMES games
+    if (time.time() - last_dropped_time) * 1000 >= Constants.BOARD_HEIGHT / Constants.NUM_GAMES * Constants.GAME_SPEED:
         add_next_tetromino(drop_count % Constants.NUM_GAMES)
         return True
     return False
 
 
-def calculate_best_position(tetromino):
+def calculate_best_positions():
     """ Applies the heuristic to a given tetromino and sets the desired position and rotation """
-    max_score = None
-    best_xpos = -1
-    best_ypos = -1
-    best_rotation = -1
+    global falling_tetrominoes
+    global heuristic_queue
+    while True:
+        if heuristic_queue:
+            for tetromino in heuristic_queue:
+                max_score = None
+                best_xpos = -1
+                best_ypos = -1
+                best_rotation = -1
 
-    # Tetrominoes are shared by adjacent games
-    min_column = int((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * (tetromino.game))
-    max_column = int((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * (tetromino.game + 1))
+                min_column = int((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * (tetromino.game))
+                max_column = int((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * (tetromino.game + 1))
 
-    dummy_tetromino = copy.copy(tetromino)
-    # Test each permutation of the tetromino
-    for xpos in range(min_column, max_column):
-        for rotation in range(len(tetromino.patterns)):
-            dummy_tetromino.rotation = rotation
-            set_dimensions(dummy_tetromino, tetromino)
-            dummy_tetromino.xpos = xpos
-            dummy_tetromino.ypos = 0
-            dummy_board = decided_board.copy()
-            # Drop the tetromino until it collides
-            while True:
-                if not check_row_below(dummy_tetromino, dummy_board):
-                    break
-            # Add tetromino to test board
-            for row in range(dummy_tetromino.height):
-                if dummy_tetromino.patterns[dummy_tetromino.rotation][row]:
-                    board_row = dummy_tetromino.ypos + row
-                    # OR the tetromino in position with the row
-                    dummy_board[board_row] |= (dummy_tetromino.patterns[dummy_tetromino.rotation][row] << dummy_tetromino.xpos)
+                dummy_tetromino = copy.copy(tetromino)
+                # Test each permutation of the tetromino
+                for xpos in range(min_column, max_column):
+                    for rotation in range(len(tetromino.patterns)):
+                        dummy_tetromino.rotation = rotation
+                        set_dimensions(dummy_tetromino, tetromino)
+                        dummy_tetromino.xpos = xpos
+                        dummy_tetromino.ypos = 0
+                        # Check tetromino doesn't extend off side of board
+                        if dummy_tetromino.xpos + dummy_tetromino.width <= Constants.BOARD_WIDTH:
+                            dummy_board = board_decided.copy()
+                            # Drop the tetromino until it collides
+                            while True:
+                                if not check_row_below(dummy_tetromino, dummy_board):
+                                    break
+                            # Add tetromino to test board
+                            for row in range(dummy_tetromino.height):
+                                if dummy_tetromino.patterns[dummy_tetromino.rotation][row]:
+                                    board_row = dummy_tetromino.ypos + row
+                                    # OR the tetromino in position with the row
+                                    dummy_board[board_row] |= (dummy_tetromino.patterns[dummy_tetromino.rotation][row] << dummy_tetromino.xpos)
 
-            board_score = calculate_board_score(dummy_tetromino, tetromino.xpos, dummy_board)
-            if max_score is None or board_score > max_score:
-                max_score = board_score
-                best_xpos = xpos
-                best_ypos = dummy_tetromino.ypos
-                best_rotation = rotation
-    tetromino.goal_xpos = best_xpos
-    tetromino.goal_rotation = best_rotation
+                            board_score = calculate_board_score(dummy_tetromino, tetromino.xpos, dummy_board)
+                            if max_score is None or board_score > max_score:
+                                max_score = board_score
+                                best_xpos = xpos
+                                best_ypos = dummy_tetromino.ypos
+                                best_rotation = rotation
+                tetromino.goal_xpos = best_xpos
+                tetromino.goal_rotation = best_rotation
 
-    dummy_tetromino.xpos = best_xpos
-    dummy_tetromino.ypos = best_ypos
-    dummy_tetromino.rotation = best_rotation
-    set_dimensions(dummy_tetromino, tetromino)
-    add_tetromino_to_decided(dummy_tetromino)
+                dummy_tetromino.xpos = best_xpos
+                dummy_tetromino.ypos = best_ypos
+                dummy_tetromino.rotation = best_rotation
+                set_dimensions(dummy_tetromino, tetromino)
+                add_tetromino_to_decided(dummy_tetromino)
+                heuristic_queue.remove(tetromino)
 
 
 def set_dimensions(dummy_tetromino, tetromino):
@@ -186,13 +195,12 @@ def set_dimensions(dummy_tetromino, tetromino):
 
 def add_tetromino_to_decided(tetromino):
     """ Adds the tetromino to the decided board state """
-    global decided_board
-    # Add the tetromino to the board representation
+    global board_decided
     for row in range(tetromino.height):
         if tetromino.patterns[tetromino.rotation][row]:
             board_row = tetromino.ypos + row
             # OR the tetromino in position with the row
-            decided_board[board_row] |= (tetromino.patterns[tetromino.rotation][row] << tetromino.xpos)
+            board_decided[board_row] |= (tetromino.patterns[tetromino.rotation][row] << tetromino.xpos)
 
 
 def check_row_below(tetromino, board):
@@ -213,7 +221,6 @@ def check_row_below(tetromino, board):
 
 def calculate_board_score(tetromino, home_position, board):
     """ Applies the heuristic to calculate a score for the given board state """
-    # Covered empty spaces
     covered_empty_spaces = 0
     column_heights = []
     for column in range(Constants.BOARD_WIDTH):
@@ -230,41 +237,26 @@ def calculate_board_score(tetromino, home_position, board):
                 empty_spaces = 0
         column_heights.append(column_height)
 
-    # Average column height
     average_column_height = sum(column_heights) / len(column_heights)
 
-    # Column height variance
     total_height_variation = 0
     for column in range(1, len(column_heights)):
         total_height_variation += abs(column_heights[column] - column_heights[column - 1])
-        # Wrap variation calculation to remove heavy preference for rightmost column
-        total_height_variation += abs(column_heights[0] - column_heights[-1])
-    column_height_variance = total_height_variation
+    # Wrap variation calculation to remove any preference/aversion for outermost columns
+    total_height_variation += abs(column_heights[0] - column_heights[-1])
 
     cumulative_score = covered_empty_spaces * Constants.COVERED_EMPTY_SPACES_FACTOR
     cumulative_score += average_column_height * Constants.AVERAGE_COLUMN_HEIGHT_FACTOR
-    cumulative_score += column_height_variance * Constants.COLUMN_HEIGHT_VARIANCE_FACTOR
+    cumulative_score += total_height_variation * Constants.HEIGHT_VARIATION_FACTOR
 
-    # Distance to move
     distance = abs(tetromino.xpos - home_position)
     cumulative_score += distance * Constants.DISTANCE_FACTOR
 
-    # Complete lines
     complete_lines = 0
     for row in range(tetromino.height):
         board_row = tetromino.ypos + row
         if board[board_row] == ((1 << Constants.BOARD_WIDTH) - 1):
             complete_lines += 1
-
-    if average_column_height >= Constants.BOARD_HEIGHT / 2:
-        # Prefer clearing lines rather than waiting for tetris
-        cumulative_score += complete_lines * Constants.COMPLETE_LINES_FACTOR
-    else:
-        # Discourage placement in leftmost column unless I clearing 4 lines
-        if complete_lines == 4:
-            cumulative_score += Constants.TETRIS_PREFERENCE_FACTOR
-        elif tetromino.xpos == 0:
-            cumulative_score -= Constants.TETRIS_PREFERENCE_FACTOR
 
     return cumulative_score
 
@@ -274,17 +266,14 @@ def add_next_tetromino(game):
     global falling_tetrominoes
     global board
     new_tetromino = get_next_tetromino(game)
-    falling_tetrominoes[game].append(new_tetromino)
-    heuristic_thread = threading.Thread(target=calculate_best_position, args=(new_tetromino, ))
-    heuristic_thread.start()
-    # Check if the tetromino will collide
+    falling_tetrominoes.append(new_tetromino)
+    heuristic_queue.append(new_tetromino)
     if tetromino_collides(new_tetromino, board):
         return False  # Game over
 
     add_tetromino_to_display(new_tetromino)
     Display.update_display(board_display)
 
-    # Successfully added
     return True
 
 
@@ -313,13 +302,11 @@ def get_tetromino(tetromino_id, game):
 def tetromino_collides(tetromino, board):
     """ Checks if the tetromino will collide with any others on the board and returns True if a collision occurs """
     for row in range(tetromino.height):
-        # Only check if row is non-zero, i.e. the tetromino occupies space in the row
         if tetromino.patterns[tetromino.rotation][row]:
             # Bitwise AND the tetromino pattern in position with the board, collision occurs if result > 0
             tetromino_bit_pattern = tetromino.patterns[tetromino.rotation][row] << tetromino.xpos
             if tetromino_bit_pattern & board[tetromino.ypos + row]:
                 return True
-    # No collisions
     return False
 
 
@@ -327,10 +314,8 @@ def attempt_rotation(tetromino):
     """ Checks if the tetromino can be rotated and does so if possible """
     # After rotation, the height and width of the block will have swapped, check it still fits in the play area
     if tetromino.xpos + tetromino.height > Constants.BOARD_WIDTH:
-        # Tetromino extends past right edge of board
         return False
     if tetromino.ypos + tetromino.width > Constants.BOARD_HEIGHT:
-        # Tetromino extends past bottom of board
         return False
 
     # The tetromino would remain in the play area, check for collisions
@@ -368,18 +353,15 @@ def attempt_rotation(tetromino):
 def attempt_move_left(tetromino):
     """ Checks if the tetromino can be moved left and does so if possible """
     if tetromino.xpos - 1 < 0:
-        # The tetromino would leave left edge
         return False
 
     # The tetromino would remain in the play area, check for collisions
     tetromino.xpos -= 1
     global board
     if tetromino_collides(tetromino, board):
-        # The tetromino collides, move not possible
         tetromino.xpos += 1
         return False
 
-    # The move is possible, make it
     tetromino.xpos += 1
     remove_tetromino_from_display(tetromino)
     tetromino.xpos -= 1
@@ -391,20 +373,16 @@ def attempt_move_left(tetromino):
 
 def attempt_move_right(tetromino):
     """ Checks if the tetromino can be moved right and does so if possible """
-    # Position is top left corner of tetromino
     if tetromino.xpos + tetromino.width + 1 > Constants.BOARD_WIDTH:
-        # The tetromino would leave right edge
         return False
 
     # The tetromino would remain in the play area, check for collisions
     tetromino.xpos += 1
     global board
     if tetromino_collides(tetromino, board):
-        # The tetromino collides, move not possible
         tetromino.xpos -= 1
         return False
 
-    # The move is possible, make it
     tetromino.xpos -= 1
     remove_tetromino_from_display(tetromino)
     tetromino.xpos += 1
@@ -422,7 +400,6 @@ def attempt_drop_one_row(tetromino):
     if not check_row_below(tetromino, board):
         return False
 
-    # The move is possible, make it
     tetromino.ypos -= 1
     remove_tetromino_from_display(tetromino)
     tetromino.ypos += 1
@@ -437,17 +414,15 @@ def place_tetromino_and_create_next(tetromino):
     the tetromino is in. We then attempt to add a new tetromino at the top of the board. Returns true if this is
     successful and false if not (signifying the game is over) """
     global board
+    falling_tetrominoes.remove(tetromino)
+
     # Add the tetromino to the board representation
     for row in range(tetromino.height):
         if tetromino.patterns[tetromino.rotation][row]:
             board_row = tetromino.ypos + row
             # OR the tetromino in position with the row
             board[board_row] |= (tetromino.patterns[tetromino.rotation][row] << tetromino.xpos)
-    # Check if it completed any rows
     check_for_completed_rows(tetromino)
-    # Remove the tetromino from the falling tetrominoes
-    falling_tetrominoes[tetromino.game].remove(tetromino)
-    # Attempt to add the next tetromino
     return add_next_tetromino(tetromino.game)
 
 
@@ -457,22 +432,38 @@ def check_for_completed_rows(tetromino):
     """
     global board
     global board_display
+    global board_decided
+    global cleared_lines
     lines_cleared = False
     for row in range(tetromino.height):
         board_row = tetromino.ypos + row
         if board[board_row] == ((1 << Constants.BOARD_WIDTH) - 1):
             # Line is complete, clear it
             lines_cleared = True
+            cleared_lines += 1
+
+            # Clear all falling tetrominoes from display
+            for falling_tetromino in falling_tetrominoes:
+                remove_tetromino_from_display(falling_tetromino)
+
             # Copy every row above the current row down one space in both board and board_display
             for i in range(board_row + 1):
                 board[board_row - i] = board[board_row - i - 1]
+                board_decided[board_row - i] = board_decided[board_row - i - 1]
                 for j in range(Constants.BOARD_WIDTH):
                     board_display[(board_row - i) * Constants.BOARD_WIDTH + j] = board_display[
                         (board_row - i - 1) * Constants.BOARD_WIDTH + j]
+
             # Add an empty row at the top
             board[0] = 0
+            board_decided[0] = 0
             for column in range(Constants.BOARD_WIDTH):
                 board_display[column] = (0, 0, 0)
+
+            # Add all falling tetrominoes back to the display
+            for falling_tetromino in falling_tetrominoes:
+                add_tetromino_to_display(falling_tetromino)
+
     if lines_cleared:
         Display.update_display(board_display)
 
@@ -502,7 +493,7 @@ def remove_tetromino_from_display(tetromino):
 
 
 def handle_game_end():
-    print("Game ended")
+    print(f'Game ended. AI cleared {cleared_lines} lines')
     print("Type 'n' to start a new game")
     while True:
         user_input = sys.stdin.read(1)
@@ -514,6 +505,8 @@ def handle_game_end():
 def reset_game_properties():
     global game_over
     game_over = False
+    global cleared_lines
+    cleared_lines = 0
 
 
 if __name__ == "__main__":
