@@ -26,10 +26,10 @@ queues = [[] for _ in range(Constants.NUM_GAMES)]
 falling_tetrominoes = []
 # Queue for tetrominoes to be process by heuristic
 heuristic_queue = []
-# Global game over signal to allow thread to signify game end
+# Game over signal to allow thread to signify game end
 game_over = False
-# Global cleared lines counter
 cleared_lines = 0
+highest_row = 0
 
 
 def initialise_game():
@@ -134,6 +134,8 @@ def calculate_best_positions():
     """ Applies the heuristic to a given tetromino and sets the desired position and rotation """
     global falling_tetrominoes
     global heuristic_queue
+    global highest_row
+
     while True:
         if heuristic_queue:
             for tetromino in heuristic_queue:
@@ -152,6 +154,7 @@ def calculate_best_positions():
                         dummy_tetromino.rotation = rotation
                         set_dimensions(dummy_tetromino, tetromino)
                         dummy_tetromino.xpos = xpos
+                        dummy_tetromino.ypos = highest_row - dummy_tetromino.height
                         dummy_tetromino.ypos = 0
                         # Check tetromino doesn't extend off side of board
                         if dummy_tetromino.xpos + dummy_tetromino.width <= Constants.BOARD_WIDTH:
@@ -196,6 +199,10 @@ def set_dimensions(dummy_tetromino, tetromino):
 def add_tetromino_to_decided(tetromino):
     """ Adds the tetromino to the decided board state """
     global board_decided
+    global highest_row
+
+    if tetromino.ypos < highest_row:
+        highest_row = tetromino.ypos
     for row in range(tetromino.height):
         if tetromino.patterns[tetromino.rotation][row]:
             board_row = tetromino.ypos + row
@@ -434,6 +441,8 @@ def check_for_completed_rows(tetromino):
     global board_display
     global board_decided
     global cleared_lines
+    global highest_row
+
     lines_cleared = False
     for row in range(tetromino.height):
         board_row = tetromino.ypos + row
@@ -441,6 +450,7 @@ def check_for_completed_rows(tetromino):
             # Line is complete, clear it
             lines_cleared = True
             cleared_lines += 1
+            highest_row -= 1
 
             # Clear all falling tetrominoes from display
             for falling_tetromino in falling_tetrominoes:
