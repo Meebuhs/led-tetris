@@ -28,7 +28,7 @@ heuristic_queue = []
 # Game over signal to allow thread to signify game end
 game_over = False
 cleared_lines = 0
-highest_row = 0
+highest_row = Constants.BOARD_HEIGHT
 
 
 def initialise_game():
@@ -189,6 +189,7 @@ def calculate_best_positions():
 
 
 def set_dimensions(dummy_tetromino, tetromino):
+    """ Sets a tetrominoes width and height according to its rotation """
     if dummy_tetromino.rotation % 2 != 0:
         dummy_tetromino.height = tetromino.width
         dummy_tetromino.width = tetromino.height
@@ -212,6 +213,7 @@ def add_tetromino_to_decided(tetromino):
 
 
 def check_row_below(tetromino, board):
+    """ Checks whether the tetromino could occupy the same position in the row below """
     # If the tetromino has reached the bottom of the board the move fails
     if tetromino.ypos + tetromino.height >= Constants.BOARD_HEIGHT:
         return False
@@ -229,6 +231,8 @@ def check_row_below(tetromino, board):
 
 def calculate_board_score(tetromino, home_position, board):
     """ Applies the heuristic to calculate a score for the given board state """
+    global highest_row
+
     complete_lines = 0
     for row in range(tetromino.height):
         board_row = tetromino.ypos + row
@@ -238,23 +242,26 @@ def calculate_board_score(tetromino, home_position, board):
                 board[board_row - i] = board[board_row - i - 1]
             board[0] = 0
 
-    total_empty_spaces = 0
-    columns_containing_empty_spaces = []
+    empty_spaces_created = 0
+    empty_spaces_nearby = 0
     column_heights = []
     for column in range(Constants.BOARD_WIDTH):
         empty_spaces = 0
         column_height = 0
-        for row in reversed(range(Constants.BOARD_HEIGHT)):
+        for row in range(Constants.BOARD_HEIGHT - 1, highest_row - tetromino.height - 1, -1):
             # Bitmask to extract the column'th bit
             position = (board[row] & (1 << column)) >> column
             if position == 0:
                 empty_spaces += 1
             else:
                 column_height = Constants.BOARD_HEIGHT - row
-                total_empty_spaces += empty_spaces
                 if empty_spaces != 0:
-                    # Each discrete cluster of empty spaces is added, further discouraging placement
-                    columns_containing_empty_spaces.append(column)
+                    # Count empty spaces in the same columns as this tetromino
+                    if column in [tetromino.xpos + x for x in range(tetromino.width)]:
+                        empty_spaces_nearby += empty_spaces
+                        # Count empty spaces created by this tetromino
+                        if row in [tetromino.ypos + y for y in range(tetromino.height + 1)]:
+                            empty_spaces_created += 1
                 empty_spaces = 0
         column_heights.append(column_height)
 
@@ -266,17 +273,15 @@ def calculate_board_score(tetromino, home_position, board):
     # Wrap variation calculation to remove any preference/aversion for outermost columns
     total_height_variation += abs(column_heights[0] - column_heights[-1])
 
-    covered_empty_spaces = [column for column in columns_containing_empty_spaces if
-                            column in [tetromino.xpos + i for i in range(tetromino.width)]]
-
     distance = abs(tetromino.xpos - home_position)
 
     cumulative_score = complete_lines * Constants.COMPLETE_LINES_FACTOR
-    cumulative_score += total_empty_spaces * Constants.TOTAL_EMPTY_SPACES_FACTOR
-    cumulative_score += len(covered_empty_spaces) * Constants.COVERED_EMPTY_SPACES_FACTOR
+    cumulative_score += empty_spaces_created * Constants.COVERED_EMPTY_SPACES_FACTOR
+    cumulative_score += empty_spaces_nearby * Constants.NEARBY_EMPTY_SPACES_FACTOR
     cumulative_score += average_column_height * Constants.AVERAGE_COLUMN_HEIGHT_FACTOR
     cumulative_score += total_height_variation * Constants.HEIGHT_VARIATION_FACTOR
-    cumulative_score += distance * Constants.DISTANCE_FACTOR
+    if distance <= 1:
+        cumulative_score += distance * Constants.DISTANCE_FACTOR
 
     return cumulative_score
 
@@ -526,6 +531,7 @@ def handle_game_end():
 
 
 def reset_game_properties():
+    """ Resets necessary properties to allow a new game to begin """
     global game_over
     game_over = False
     global cleared_lines
