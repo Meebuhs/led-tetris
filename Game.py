@@ -143,8 +143,9 @@ def calculate_best_positions():
                 best_ypos = -1
                 best_rotation = -1
 
-                min_column = int((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * (tetromino.game))
-                max_column = int((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * (tetromino.game + 1))
+                min_column = max(int((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * tetromino.game) - 1, 0)
+                max_column = min(int((Constants.BOARD_WIDTH / Constants.NUM_GAMES) * (tetromino.game + 1)) + 1,
+                                 Constants.BOARD_WIDTH)
 
                 dummy_tetromino = copy.copy(tetromino)
                 # Test each permutation of the tetromino
@@ -226,7 +227,7 @@ def check_row_below(tetromino, board):
     return True
 
 
-def calculate_board_score(tetromino, board):
+def calculate_board_score(tetromino, home_position, board):
     """ Applies the heuristic to calculate a score for the given board state """
     complete_lines = 0
     for row in range(tetromino.height):
@@ -235,8 +236,9 @@ def calculate_board_score(tetromino, board):
             complete_lines += 1
             for i in range(board_row + 1):
                 board[board_row - i] = board[board_row - i - 1]
+            board[0] = 0
 
-    covered_empty_spaces = 0
+    total_empty_spaces = 0
     columns_containing_empty_spaces = []
     column_heights = []
     for column in range(Constants.BOARD_WIDTH):
@@ -249,9 +251,10 @@ def calculate_board_score(tetromino, board):
                 empty_spaces += 1
             else:
                 column_height = Constants.BOARD_HEIGHT - row
-                covered_empty_spaces += empty_spaces
-                # Each discrete cluster of empty spaces is added, further discouraging placement
-                columns_containing_empty_spaces.append(column)
+                total_empty_spaces += empty_spaces
+                if empty_spaces != 0:
+                    # Each discrete cluster of empty spaces is added, further discouraging placement
+                    columns_containing_empty_spaces.append(column)
                 empty_spaces = 0
         column_heights.append(column_height)
 
@@ -263,14 +266,17 @@ def calculate_board_score(tetromino, board):
     # Wrap variation calculation to remove any preference/aversion for outermost columns
     total_height_variation += abs(column_heights[0] - column_heights[-1])
 
-    positions_covering_empty_spaces = [column for column in columns_containing_empty_spaces if
-                                       column in [tetromino.xpos + i for i in range(tetromino.width)]]
+    covered_empty_spaces = [column for column in columns_containing_empty_spaces if
+                            column in [tetromino.xpos + i for i in range(tetromino.width)]]
+
+    distance = abs(tetromino.xpos - home_position)
 
     cumulative_score = complete_lines * Constants.COMPLETE_LINES_FACTOR
-    cumulative_score += covered_empty_spaces * Constants.COVERED_EMPTY_SPACES_FACTOR
-    cumulative_score += len(positions_covering_empty_spaces) * Constants.BURYING_FACTOR
+    cumulative_score += total_empty_spaces * Constants.TOTAL_EMPTY_SPACES_FACTOR
+    cumulative_score += len(covered_empty_spaces) * Constants.COVERED_EMPTY_SPACES_FACTOR
     cumulative_score += average_column_height * Constants.AVERAGE_COLUMN_HEIGHT_FACTOR
     cumulative_score += total_height_variation * Constants.HEIGHT_VARIATION_FACTOR
+    cumulative_score += distance * Constants.DISTANCE_FACTOR
 
     return cumulative_score
 
