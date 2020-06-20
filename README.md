@@ -6,7 +6,9 @@ matrices.
 The tetris game code features a lot of bit bashing as it was originally a uni project written in C to run on an 
 ATmega324A microcontroller.
 
-![](docs/led-tetris-demo.gif)
+<p align="center">
+    <img src="docs/led-tetris-demo.gif">
+</p>
 
 ## Getting started
 ### Physical setup
